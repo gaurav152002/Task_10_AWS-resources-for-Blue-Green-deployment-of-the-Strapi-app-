@@ -1,0 +1,66 @@
+name: Deploy Blue Green
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: us-east-1
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
+      - name: Get Current Task Definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition gaurav-task10-task \
+            --query taskDefinition > taskdef.json
+
+      - name: Clean Task Definition
+        run: |
+          jq 'del(.taskDefinitionArn,
+                  .revision,
+                  .status,
+                  .requiresAttributes,
+                  .compatibilities,
+                  .registeredAt,
+                  .registeredBy)' taskdef.json > new-taskdef.json
+
+      - name: Register New Revision
+        id: register
+        run: |
+          NEW_REVISION=$(aws ecs register-task-definition \
+            --cli-input-json file://new-taskdef.json \
+            --query 'taskDefinition.taskDefinitionArn' \
+            --output text)
+
+          echo "TASK_DEF=$NEW_REVISION" >> $GITHUB_ENV
+
+      - name: Create CodeDeploy Deployment
+        run: |
+          aws deploy create-deployment \
+            --application-name gaurav-ecs-app \
+            --deployment-group-name gaurav-ecs-dg \
+            --revision revisionType=AppSpecContent,appSpecContent="{
+              \"version\":1,
+              \"Resources\":[
+                {
+                  \"TargetService\":{
+                    \"Type\":\"AWS::ECS::Service\",
+                    \"Properties\":{
+                      \"TaskDefinition\":\"$TASK_DEF\",
+                      \"LoadBalancerInfo\":{
+                        \"ContainerName\":\"strapi\",
+                        \"ContainerPort\":1337
+                      }
+                    }
+                  }
+                }
+              ]
+            }"
