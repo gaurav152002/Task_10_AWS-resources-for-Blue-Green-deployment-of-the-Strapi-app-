@@ -15,15 +15,22 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: us-east-1
 
+      # 🔹 Get latest task definition ARN
+      - name: Get Latest Task Definition
+        id: taskdef
+        run: |
+          TASK_DEF_ARN=$(aws ecs describe-services \
+            --cluster gaurav-task10-cluster \
+            --services gaurav-task10-service \
+            --query "services[0].taskDefinition" \
+            --output text)
+          echo "TASK_DEF_ARN=$TASK_DEF_ARN" >> $GITHUB_ENV
+
+      # 🔹 Trigger Blue/Green deployment
       - name: Trigger CodeDeploy Deployment
         run: |
           aws deploy create-deployment \
             --application-name gaurav-ecs-app \
             --deployment-group-name gaurav-ecs-dg \
             --deployment-config-name CodeDeployDefault.ECSCanary10Percent5Minutes \
-            --revision '{
-              "revisionType": "AppSpecContent",
-              "appSpecContent": {
-                "content": "{\"version\":1,\"Resources\":[{\"TargetService\":{\"Type\":\"AWS::ECS::Service\",\"Properties\":{\"TaskDefinition\":\"gaurav-task10-task\",\"LoadBalancerInfo\":{\"ContainerName\":\"strapi\",\"ContainerPort\":1337}}}}]}"
-              }
-            }'
+            --revision "{\"revisionType\":\"AppSpecContent\",\"appSpecContent\":{\"content\":\"{\\\"version\\\":1,\\\"Resources\\\":[{\\\"TargetService\\\":{\\\"Type\\\":\\\"AWS::ECS::Service\\\",\\\"Properties\\\":{\\\"TaskDefinition\\\":\\\"$TASK_DEF_ARN\\\",\\\"LoadBalancerInfo\\\":{\\\"ContainerName\\\":\\\"strapi\\\",\\\"ContainerPort\\\":1337}}}}]}\"}}"
